@@ -1,0 +1,92 @@
+import numpy as np
+import sympy as sp
+
+class PropagacaoVariancias:
+    def __init__(self):
+        self.titulo('dados')
+        self.entrada()
+    def titulo(self, nome:str):
+        print('=' * 50)
+        print(f'{' ' * (25 - (len(nome) // 2))}{nome.upper()}')
+        print('=' * 50)
+    def entrada(self):
+        n_obs = self.ler_int(f'Quantidade de Observações: ')
+        n_par = self.ler_int(f'Quantidade de Parâmetros: ')
+        n_cov = self.ler_int(f'Quantidade de Covariâncias: ')
+        str_par = [input(f'Nome do Parâmetro {i+1}: ') for i in range(n_par)]
+        str_obs = [input(f'Variável da Observação {i+1}: ') for i in range(n_obs)]
+        val_obs = [self.ler_float(f'Valor de "{str_obs[i]}" = ') for i in range(n_obs)]
+        self.n_obs,self.n_par,self.n_cov = n_obs, n_par, n_cov
+        self.str_par,self.str_obs,self.val_obs = str_par, str_obs, val_obs
+    def ler_int(self,entrada):
+        while True:
+            try:
+                return int(input(entrada))
+            except ValueError:
+                print("Erro! Digite apenas um número inteiro.")
+    def ler_float(self,msg):
+        while True:
+            try:
+                val = input(msg).replace(' ','').replace(',','.')
+                return float(val)
+            except ValueError:
+                print(f'Digite apenas números!')
+    def executar(self):
+        n_par = self.n_par
+        str_par = self.str_par
+        J = self.jacobiana()
+        MVC = self.mvc()
+        calc = J@MVC@J.T
+        dic = self.dic
+        eq = self.eq
+        self.titulo('resultado')
+        print(calc)
+        for i in range(n_par):
+            res = '['
+            for j in range(n_par):
+                res += f'{calc[i][j]:.4f}'.rstrip('0').rstrip('.')
+                if j < n_par-1:
+                    res += ','
+            print(f'{str_par[i]} = {res}]')
+        for i in range(n_par):
+            res = eq[i].subs(dic)
+            print(f'{str_par[i]} = {res:.4f} ± {np.sqrt(calc[i][i])}')
+    def jacobiana(self):
+        self.titulo('jacobiana')
+        n_obs = self.n_obs
+        n_par = self.n_par
+        str_par = self.str_par
+        str_obs = self.str_obs
+        val_obs = self.val_obs
+        var_obs = [sp.Symbol(str_obs[i]) for i in range(n_obs)]
+        dic = {var_obs[i]: val_obs[i] for i in range(n_obs)}
+        J = np.zeros((n_par,n_obs))
+        eq = [sp.sympify(input(f'Equação do parêmetro "{str_par[i]}": ')) for i in range(n_par)]
+        for i in  range(n_par):
+            for j in range(n_obs):
+                der = sp.diff(eq[i],var_obs[j])
+                J[i][j] = float(der.subs(dic))
+        print(f'\n{J}')
+        self.eq,self.dic = eq,dic
+        return J
+    def mvc(self):
+        self.titulo('mvc')
+        n_obs = self.n_obs
+        n_cov = self.n_cov
+        MVC = np.zeros((n_obs, n_obs))
+        for i in range(n_obs):
+            for j in range(n_obs):
+                if i == j:
+                    MVC[i][j] = self.ler_float(f'Variância da observação {i + 1}: ')
+                else:
+                    if n_cov > 0:
+                        MVC[i][j] = self.ler_float(f'Covariância da observação {i + 1} com {j + 1}: ')
+        print(f'\n{MVC}')
+        return MVC
+
+
+calc = PropagacaoVariancias()
+calc.executar()
+
+
+
