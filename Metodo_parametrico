@@ -1,0 +1,419 @@
+import numpy as np
+import sympy as sp
+from scipy import stats as scst
+
+class Parametrico:
+    def __init__(self):
+        self.n_obs = None
+        self.n_par = None
+        self.n_cov = None
+        self.str_obs = None
+        self.val_obs = None
+        self.str_par = None
+        self.alfa = 0.05
+        self.var_priori = 1
+        self.precisao = 6
+        self.epslon = 0.001
+    def titulo(self,nome:str):
+        print('=' * 100)
+        print(f'{' ' * (50-(len(nome)//2))}{nome.upper()}')
+        print('=' * 100)
+        print('')
+    def mostrar_matriz(self,nome:str,matriz,linha,coluna):
+        print(f'{nome} ({linha}x{coluna}):')
+        if type(matriz) == list:
+            matriz = [[valor] for valor in matriz]
+        afastamento = []
+        for i in range(linha):
+            for j in range(coluna):
+                letra = f'{matriz[i][j]}'
+                if i == 0:
+                    afastamento.append(len(letra))
+                elif len(letra) > afastamento[j]:
+                    afastamento[j] = len(letra)
+        for i in range(linha):
+            if i == 0:
+                res = '⎡'
+            elif i == linha-1:
+                res = '⎣'
+            else:
+                res = '|'
+            for j in range(coluna):
+                try:
+                    res += f'{matriz[i][j]:^{afastamento[j]}.{self.precisao}f}'.rstrip('0').rstrip('.')
+                except (ValueError,TypeError):
+                    res += f'{str(matriz[i][j]):^{afastamento[j]}}'
+                if j == coluna-1 and i == 0:
+                    res += '⎤'
+                elif j == coluna-1 and 0 < i < linha-1:
+                    res += '|'
+                elif j == coluna-1 and i == linha-1:
+                    res += '⎦'
+                else:
+                    res += '    '
+            print(res)
+    def redundancia(self, n_1, n_2):
+        while n_1 <= n_2:
+            print(f'~\nErro: o número de observações ({n_1}) tem que ser maior que o de parâmetros ({n_2})\n')
+            n_1 = self.ler_int('Quantidade de observações: ')
+            n_2 = self.ler_int('Quantidade de parâmetros: ')
+        return n_1, n_2
+    def ler_int(self, msg):
+        while True:
+            try:
+                valor = int(input(msg))
+                if valor > 0:
+                    return valor
+                else:
+                    print(f'\nErro! Digite apenas números inteiros > 0.\n')
+            except ValueError:
+                print(f'\nErro! Digite apenas números inteiros.\n')
+    def ler_float(self, msg):
+        while True:
+            try:
+                val = input(msg).replace(' ', '').replace(',', '.')
+                return float(val)
+            except ValueError:
+                print(f'\nErro! Digite apenas números.\n')
+    def ler_cov(self,msg):
+        verifica = input(msg).strip().upper()
+        if verifica == 'S':
+            self.n_cov = True
+        else:
+            self.n_cov = False
+    def set_precisao(self,valor):
+        while True:
+            try:
+                valor = int(valor)
+                if valor <= 0:
+                    raise ValueError
+                self.precisao = valor
+                break
+            except ValueError:
+                print(f'\nErro! A precisão há de ser inteiro > 0\n')
+                valor = input('Digite o valor da precisão: ')
+        self.precisao = valor
+    def set_epslon(self,valor):
+        while True:
+            try:
+                valor = float(valor)
+                if valor <= 0:
+                    raise ValueError
+                self.epslon = valor
+                break
+            except ValueError:
+                print(f'\nErro! A precisão há de ser inteiro > 0\n')
+                valor = input('Digite o valor da precisão: ')
+    def executar(self):
+        self.entrada()
+        self.vetores()
+        self.estocastico()
+        self.mod_mat()
+        self.par_aprox()
+        self.obs_aprox()
+        self.vetor_L()
+        self.matriz_A()
+        self.matriz_X()
+        self.par_ajust()
+        self.vet_residuos()
+        #self.iteracao()
+        self.var_posteriori()
+        self.qui_quadrado()
+        self.MVC_post_par()
+        self.MVC_post_obs()
+        self.MVC_post_residuos()
+#0 - Dados
+    def entrada(self):
+        self.titulo('Dados')
+        n_obs = self.ler_int('Quantidade de observações: ')
+        n_par = self.ler_int('Quantidade de parâmetros: ')
+        if n_obs <= n_par:
+            n_obs,n_par = self.redundancia(n_obs,n_par)
+        n_cov = self.ler_cov('Tem covariância (s/n): ')
+        print('')
+        str_obs = [input(f'Variável da Observação {i + 1}: ') for i in range(n_obs)]
+        print('')
+        val_obs = [self.ler_float(f'Valor da Observação "{i}" = ') for i in str_obs]
+        print('')
+        str_par = [input(f'Nome do Parâmetro {i + 1}: ') for i in range(n_par)]
+        self.n_obs,self.n_par,self.n_cov = n_obs,n_par,n_cov
+        self.val_obs = val_obs
+        self.str_obs,self.str_par = str_obs,str_par
+#1 - Vetor observação e vetor dos parâmetros:
+    def vetores(self):
+        self.titulo('1° - Vetores')
+        n_obs = self.n_obs
+        n_par = self.n_par
+        str_obs = self.str_obs
+        str_par = self.str_par
+        val_obs = self.val_obs
+        Lb = np.zeros((n_obs,1))
+        x0 = np.empty((n_par,1), dtype=object)
+        for i in range(n_obs):
+            Lb[i][0] = val_obs[i]
+        for i in range(n_par):
+            x0[i][0] = sp.Symbol(str_par[i])
+        print('Vetor das observações:')
+        for i in range(n_obs):
+            valor = f'{val_obs[i]}'
+            if i == 0:
+                print(f'⎡{str_obs[i]}⎤  ⎡{valor}⎤')
+            elif i == n_obs-1:
+                print(f'⎣{str_obs[i]}⎦  ⎣{valor}⎦')
+            else:
+                print(f'|{str_obs[i]}|  |{valor}|')
+        self.mostrar_matriz('Vetor dos parâmetros:',str_par,n_par,1)
+        self.vet_Lb = Lb
+        self.vet_x0 = x0
+#2 - Modelo estocástico:
+    def estocastico(self):
+        self.titulo('2° - Matriz peso')
+        n_obs = self.n_obs
+        n_cov = self.n_cov
+        str_obs = self.str_obs
+        var_priori = self.var_priori
+        MVC = np.zeros((n_obs,n_obs))
+        for i in range(n_obs):
+            for j in range(n_obs):
+                if i == j:
+                    MVC[i][j] = self.ler_float(f'Variância da Observação {str_obs[i]}: ')
+                elif i < j and n_cov == True:
+                    MVC[i][j] = self.ler_float(f'Covariância da Observação {str_obs[i]} com {str_obs[j]}: ')
+                    MVC[j][i] = MVC[i][j]
+        MVC_inv = np.linalg.inv(MVC)
+        peso = var_priori*MVC_inv
+        print('')
+        self.mostrar_matriz('MVC',MVC,n_obs,n_obs)
+        self.mostrar_matriz('Peso',peso,n_obs,n_obs)
+        self.peso,self.MVC = peso,MVC
+#3 - modelo matemático:
+    def mod_mat(self):
+        self.titulo('3° - Modelo matemático')
+        str_obs = self.str_obs
+        n_obs = self.n_obs
+        str_par = self.str_par
+        par_simbolos = {nome: sp.Symbol(nome) for nome in str_par}
+        eq = [sp.sympify(input(f'Equação da Observação {i} = '),locals=par_simbolos) for i in str_obs]
+        print('')
+        self.mostrar_matriz('Modelo matemático',eq,n_obs,1)
+        self.equacao = eq
+#4 - Vetor dos Parâmetros aproximados:
+    def par_aprox(self):
+        self.titulo('4° - Parâmetros aproximados')
+        str_par = self.str_par
+        n_par = self.n_par
+        dic = {sp.Symbol(i): self.ler_float(f'Parâmetro aproximado {i} = ') for i in str_par}
+        cont = 0
+        for i in str_par:
+            valor = f'{dic[sp.Symbol(i)]}'
+            if cont == 0:
+                print(f'⎡{i}⎤ ⎡{valor}⎤')
+            elif cont == n_par - 1:
+                print(f'⎣{i}⎦ ⎣{valor}⎦')
+            else:
+                print(f'|{i}| |{valor}|')
+            cont += 1
+        self.dic_par_aprox = dic
+#5 - Observações aproximadas L0:
+    def obs_aprox(self):
+        self.titulo('5° - Observações aproximadas L0')
+        n_obs = self.n_obs
+        str_obs = self.str_obs
+        dic = self.dic_par_aprox
+        eq = self.equacao
+        L0 = np.zeros((n_obs,1))
+        for i in range(n_obs):
+            L0[i][0] = float(eq[i].subs(dic))
+        for i in range(n_obs):
+            valor = f'{L0[i][0]}'
+            if i == 0:
+                print(f'⎡{str_obs[i]}⎤ ⎡{valor}⎤')
+            elif i == n_obs-1:
+                print(f'⎣{str_obs[i]}⎦ ⎣{valor}⎦')
+            else:
+                print(f'|{str_obs[i]}| |{valor}|')
+        self.vet_L0 = L0
+        return L0
+#6 - Vetor L = L0 - Lb:
+    def vetor_L(self):
+        self.titulo('6° - Vetor L')
+        n_obs = self.n_obs
+        Lb = self.vet_Lb
+        L0 = self.vet_L0
+        L = L0 - Lb
+        self.mostrar_matriz('Vetor L',L,n_obs,1)
+        self.vet_L = L
+        return L
+#7 - Elementos da matriz design(A):
+    def matriz_A(self):
+        self.titulo('7° - Matriz design A')
+        n_obs = self.n_obs
+        n_par = self.n_par
+        str_par = self.str_par
+        eq = self.equacao
+        A = np.zeros((n_obs,n_par))
+        var_par = [sp.Symbol(i) for i in str_par]
+        dic = self.dic_par_aprox
+        for i in range(n_obs):
+            for j in range(n_par):
+                der = sp.diff(eq[i],var_par[j])
+                A[i][j] = float(der.subs(dic))
+        self.mostrar_matriz('Matriz A',A,n_obs,n_par)
+        self.matz_A = A
+        return A
+#8 - Correção dos valores aproximados X:
+    def matriz_X(self):
+        self.titulo('8° - Correção dos valores aproximados X')
+        n_par = self.n_par
+        A = self.matz_A
+        P = self.peso
+        L = self.vet_L
+        X = (-np.linalg.inv((A.T@P@A)))@A.T@P@L
+        self.mostrar_matriz('Vetor X',X,n_par,1)
+        self.matz_X = X
+        return X
+#9 - Parâmetros ajustados Xa:
+    def par_ajust(self):
+        self.titulo('9° - Parâmetros ajustados Xa')
+        n_par = self.n_par
+        str_par = self.str_par
+        par = [sp.Symbol(i) for i in str_par]
+        dic = self.dic_par_aprox
+        X0 = np.zeros((n_par,1))
+        for i in range(n_par):
+            X0[i][0] = dic[par[i]]
+        X = self.matz_X
+        Xa = X0 + X
+        self.mostrar_matriz('Vetor Xa',Xa,n_par,1)
+        self.vet_Xa = Xa
+#10 - Vetros dos Resíduos:
+    def vet_residuos(self):
+        self.titulo('10° - Resíduos')
+        n_obs = self.n_obs
+        A = self.matz_A
+        X = self.matz_X
+        L = self.vet_L
+        V = A@X + L
+        self.mostrar_matriz('Resíduos',V,n_obs,1)
+        self.vet_V = V
+#-------- Iteração ------------
+    def iteracao(self):
+        str_par = self.str_par
+        n_par = self.n_par
+        peso = self.peso
+        epslon = self.epslon
+        X = self.matz_X
+        maior = 0
+        for i in range(n_par):
+            if X[i][0] < 0:
+                X[i][0] *= -1
+            if X[i][0] > maior:
+                maior = X[i][0]
+        if maior <= epslon:
+            return
+        iter = 1
+        while True:
+            self.titulo(f'Iteração {iter}')
+            vet_Xa = self.vet_Xa
+            par_aprox_01 = {}
+            for i in range(n_par):
+                par_aprox_01[sp.Symbol(str_par[i])] = vet_Xa[i][0]
+            self.dic_par_aprox = par_aprox_01
+            obs_aprox = self.obs_aprox()
+            L = self.vetor_L()
+            A = self.matriz_A()
+            X = self.matriz_X()
+            Xa = self.par_ajust
+            V = self.vet_residuos()
+            maior = 0
+            for i in range(n_par):
+                if X[i][0] < 0:
+                    X[i][0] *= -1
+                if X[i][0] > maior:
+                    maior = X[i][0]
+            if maior <= epslon:
+                break
+            if iter == 100:
+                print('')
+                print('Limite atingido de 100 iterações!')
+                print('')
+                break
+            iter += 1
+        self.titulo(f'Quantidade de iterações = {iter}')
+#11 - Variância Posteriori:
+    def var_posteriori(self):
+        self.titulo('11° - Variância posterirori')
+        V = self.vet_V
+        P = self.peso
+        n_obs = self.n_obs
+        n_par = self.n_par
+        var_posteriori = float((V.T@P@V)[0,0])/(n_obs-n_par)
+        print(f'Variância posteriori = {var_posteriori}')
+        self.var_post = var_posteriori
+#12 - Teste do qui-quadrado:
+    def qui_quadrado(self):
+        self.titulo('12° - Teste do do qui-quadrado')
+        n_obs = self.n_obs
+        n_par = self.n_par
+        V = self.vet_V
+        P = self.peso
+        var_priori = self.var_priori
+        alfa = self.alfa
+        gl = n_obs - n_par
+        qui2_calc = float((V.T@P@V)[0,0])/var_priori
+        lim_inf = scst.chi2.ppf((alfa/2),gl)
+        lim_sup = scst.chi2.ppf(1-(alfa/2),gl)
+        print(f'Graus de liberdade = {gl}')
+        print(f'Limite inferior = {lim_inf:.{self.precisao}f}')
+        print(f'Qui-quadrado calculado = {qui2_calc:.{self.precisao}f}')
+        print(f'Limite superior = {lim_sup:.{self.precisao}f}\n')
+        if lim_inf < qui2_calc < lim_sup:
+            print(f'=> Não rejeita H0: {lim_inf} < {qui2_calc} < {lim_sup}\n')
+            print(f'=> A diferença entre as variâncias não é estatisticamente significativa.')
+        else:
+            print(f'=> Rejeita H0.\n')
+            if lim_inf > qui2_calc:
+                print(f'=> O limite inferiror é maior que o qui-quadrado calculado: {lim_inf} > {qui2_calc}')
+            else:
+                print(f'=> O qui-quadrado calculado é maior que o limite superiror: {qui2_calc} > {lim_sup}')
+            print(f'=> A diferença entre as variâncias é estatisticamente significativa.')
+            if self.var_priori < self.var_post:
+                print(f'=> A qualidade das observações foi superestimada: variância a priori ({self.var_priori}) < variância a posteriori ({self.var_post})')
+            else:
+                print(f'=> A qualidade das observações foi subestimada: variância a priori ({self.var_priori}) > variância a posteriori ({self.var_post})')
+        print('')
+#13 - MVC a posteriori dos parâmetros:
+    def MVC_post_par(self):
+        self.titulo('13° - Mvc posteriori dos parâmetros')
+        n_par = self.n_par
+        A = self.matz_A
+        P = self.peso
+        var_post = self.var_post
+        MVC = var_post*np.linalg.inv(A.T@P@A)
+        self.mostrar_matriz('MVC posteriori dos parâmetros',MVC,n_par,n_par)
+        self.MVC_par = MVC
+#14 - MVC a posteriori das observações ajustadas:
+    def MVC_post_obs(self):
+        self.titulo('15° - Mvc posteriori das observações ajustadas')
+        n_obs = self.n_obs
+        A = self.matz_A
+        P = self.peso
+        var_post = self.var_post
+        MVC = var_post*A@np.linalg.inv(A.T@P@A)@A.T
+        self.mostrar_matriz('MVC das observações ajustadas',MVC,n_obs,n_obs)
+        self.MVC_obs = MVC
+#15 - MVC a posteriori dos resíduos:
+    def MVC_post_residuos(self):
+        self.titulo('16° - Mvc posteriori dos resíduos')
+        n_obs = self.n_obs
+        A = self.matz_A
+        P = self.peso
+        var_post = self.var_post
+        MVC = var_post*(A@np.linalg.inv(A.T@P@A)@A.T - np.linalg.inv(P))
+        self.mostrar_matriz('MVC posteriori dos Resíduos',MVC,n_obs,n_obs)
+        self.MVC_residuos = MVC
+
+
+par = Parametrico()
+par.set_precisao(15)
+par.executar()
